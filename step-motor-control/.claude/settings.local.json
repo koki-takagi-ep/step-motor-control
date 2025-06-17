@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod:*)",
+      "Bash(source:*)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "Bash(./run.sh:*)",
+      "Bash(pip show:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": []
+  }
+}
