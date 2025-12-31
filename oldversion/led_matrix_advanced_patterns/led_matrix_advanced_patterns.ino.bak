@@ -1,0 +1,828 @@
+/*
+  Arduino R4 WiFi - 超面白いLEDマトリックスパターン
+  2025年5月10日にKokiさん用に作成
+  
+  このスケッチは、Arduino UNO R4 WiFiボードの内蔵12x8 LEDマトリックスで
+  より複雑で視覚的に魅力的なパターンを表示します。
+  
+  特徴:
+  - 8種類の高度なアニメーションパターン
+  - 複雑な視覚効果（炎、花火、ゲームなど）
+  - パターン間の滑らかな遷移効果
+  - 各パターンの速度とパラメータを調整可能
+  
+  ハードウェア:
+  - Arduino UNO R4 WiFi（内蔵12x8 LEDマトリックス付き）
+*/
+
+#include "Arduino_LED_Matrix.h"
+
+ArduinoLEDMatrix matrix;
+
+// LEDマトリックス用のフレームバッファ
+uint8_t frame[8][12] = {
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+};
+
+// フレームの一時的なコピー（遷移効果用）
+uint8_t tempFrame[8][12];
+
+// パターンモード変数
+int currentPattern = 0;
+const int totalPatterns = 8; // パターンの総数
+unsigned long lastPatternChange = 0;
+const unsigned long patternDuration = 8000; // パターンごとに8秒
+bool inTransition = false;
+unsigned long transitionStartTime = 0;
+const unsigned long transitionDuration = 1000; // 遷移に1秒
+
+// 花火パターン変数
+const int MAX_FIREWORKS = 3;
+int fireworkX[MAX_FIREWORKS];
+int fireworkY[MAX_FIREWORKS];
+int fireworkStage[MAX_FIREWORKS]; // 0=発射中, 1=爆発中, 2=消滅
+int fireworkSize[MAX_FIREWORKS];
+unsigned long fireworkLastUpdate[MAX_FIREWORKS];
+
+// 炎のパターン変数
+uint8_t flameIntensity[12];
+unsigned long flameLastUpdate = 0;
+
+// スネークゲーム変数
+int snakeX[20], snakeY[20]; // スネークの最大長さは20
+int snakeLength = 3;
+int snakeDirection = 0; // 0=右, 1=下, 2=左, 3=上
+int foodX, foodY;
+unsigned long snakeLastUpdate = 0;
+const unsigned long snakeSpeed = 300; // スネークの動きの速さ
+
+// マトリックス効果変数
+const int MAX_DROPS = 12;
+int dropY[MAX_DROPS];
+int dropSpeed[MAX_DROPS];
+int dropActive[MAX_DROPS];
+
+// マンデルブロ集合変数
+const float zoom = 0.3;
+float centerX = -0.5;
+float centerY = 0.0;
+float rotationPhase = 0.0;
+
+// DNAヘリックス変数
+float dnaPhase = 0.0;
+
+// オーディオビジュアライザ変数
+uint8_t spectrum[12];
+unsigned long spectrumLastUpdate = 0;
+
+// 星座パターン変数
+const int MAX_STARS = 12;
+int starX[MAX_STARS];
+int starY[MAX_STARS];
+int starBrightness[MAX_STARS];
+bool starsInitialized = false;
+
+void setup() {
+  Serial.begin(9600);
+  delay(1500); // シリアル接続のための短い遅延
+
+  // LEDマトリックスの初期化
+  matrix.begin();
+  
+  // 乱数生成の初期化
+  randomSeed(analogRead(0));
+  
+  // ウェルカムメッセージを表示
+  Serial.println("Arduino R4 WiFi - 超面白いLEDマトリックスパターン");
+  Serial.println("パターンは8秒ごとに自動的に切り替わります");
+  
+  // すべてのパターンの初期化
+  initializeAllPatterns();
+}
+
+void loop() {
+  // パターンを変更する時間かどうかをチェック
+  if (!inTransition && millis() - lastPatternChange > patternDuration) {
+    // 遷移を開始
+    inTransition = true;
+    transitionStartTime = millis();
+    
+    // 現在のフレームを保存
+    for (int y = 0; y < 8; y++) {
+      for (int x = 0; x < 12; x++) {
+        tempFrame[y][x] = frame[y][x];
+      }
+    }
+    
+    // 次のパターンに移動
+    int previousPattern = currentPattern;
+    currentPattern = (currentPattern + 1) % totalPatterns;
+    
+    // パターン固有の変数をリセット
+    if (currentPattern == 1) { // 花火パターン
+      initializeFireworks();
+    } else if (currentPattern == 3) { // スネークゲーム
+      initializeSnake();
+    } else if (currentPattern == 6) { // 星座パターン
+      initializeStars();
+    }
+    
+    // 現在のパターン情報を表示
+    Serial.print("パターンを変更: ");
+    Serial.print(previousPattern + 1);
+    Serial.print(" -> ");
+    Serial.println(currentPattern + 1);
+  }
+  
+  if (inTransition) {
+    // 遷移アニメーションを実行
+    float progress = (float)(millis() - transitionStartTime) / transitionDuration;
+    
+    if (progress >= 1.0) {
+      // 遷移が完了
+      inTransition = false;
+      lastPatternChange = millis();
+    } else {
+      // パターン間の遷移効果
+      doTransitionEffect(progress);
+    }
+  } else {
+    // 現在のパターンを実行
+    switch (currentPattern) {
+      case 0:
+        // パターン1: ダイナミック炎エフェクト
+        patternFire();
+        break;
+      case 1:
+        // パターン2: 花火ショー
+        patternFireworks();
+        break;
+      case 2:
+        // パターン3: マトリックスのような落下コード
+        patternMatrixRain();
+        break;
+      case 3:
+        // パターン4: 簡易スネークゲーム
+        patternSnake();
+        break;
+      case 4:
+        // パターン5: 幾何学的なマンデルブロパターン
+        patternMandelbrot();
+        break;
+      case 5:
+        // パターン6: DNAヘリックスアニメーション
+        patternDNAHelix();
+        break;
+      case 6:
+        // パターン7: 星座アニメーション
+        patternStarConstellation();
+        break;
+      case 7:
+        // パターン8: オーディオビジュアライザシミュレーション
+        patternAudioVisualizer();
+        break;
+    }
+  }
+  
+  // LEDマトリックスを更新
+  displayFrame();
+  
+  // アニメーション速度の調整
+  delay(30);
+}
+
+// パターン間の遷移効果
+void doTransitionEffect(float progress) {
+  clearFrame();
+  
+  // 遷移タイプを選択（進捗度に基づいて）
+  int transitionType = 0; // 0=フェード, 1=ワイプ, 2=クロスフェード
+  
+  switch (transitionType) {
+    case 0: // フェードアウト後にフェードイン
+      if (progress < 0.5) {
+        // フェードアウト: 古いフレームを徐々に消す
+        float fadeOutProgress = progress * 2.0; // 0→1に正規化
+        for (int y = 0; y < 8; y++) {
+          for (int x = 0; x < 12; x++) {
+            if (tempFrame[y][x] > 0 && random(100) / 100.0 > fadeOutProgress) {
+              frame[y][x] = 1;
+            }
+          }
+        }
+      } else {
+        // フェードイン: 新しいパターンを一度実行してからフェードイン
+        runCurrentPattern();
+        float fadeInProgress = (progress - 0.5) * 2.0; // 0→1に正規化
+        for (int y = 0; y < 8; y++) {
+          for (int x = 0; x < 12; x++) {
+            if (frame[y][x] > 0 && random(100) / 100.0 > fadeInProgress) {
+              frame[y][x] = 0;
+            }
+          }
+        }
+      }
+      break;
+      
+    case 1: // 左から右へのワイプ
+      // 左側は古いパターン、右側は新しいパターン
+      int wipeX = progress * 12;
+      
+      // 左側（古いパターン）
+      for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < wipeX; x++) {
+          frame[y][x] = tempFrame[y][x];
+        }
+      }
+      
+      // 右側（新しいパターン）
+      runCurrentPattern();
+      for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < wipeX; x++) {
+          frame[y][x] = tempFrame[y][x];
+        }
+      }
+      break;
+      
+    case 2: // クロスフェード
+      // 古いフレームと新しいフレームをブレンド
+      runCurrentPattern();
+      for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 12; x++) {
+          if (tempFrame[y][x] > 0 && random(100) / 100.0 > progress) {
+            frame[y][x] = tempFrame[y][x];
+          }
+        }
+      }
+      break;
+  }
+}
+
+// 現在のパターンを一度実行（遷移効果用）
+void runCurrentPattern() {
+  switch (currentPattern) {
+    case 0: patternFire(); break;
+    case 1: patternFireworks(); break;
+    case 2: patternMatrixRain(); break;
+    case 3: patternSnake(); break;
+    case 4: patternMandelbrot(); break;
+    case 5: patternDNAHelix(); break;
+    case 6: patternStarConstellation(); break;
+    case 7: patternAudioVisualizer(); break;
+  }
+}
+
+// すべてのパターンを初期化
+void initializeAllPatterns() {
+  // 炎パターン初期化
+  for (int i = 0; i < 12; i++) {
+    flameIntensity[i] = random(4);
+  }
+  
+  // 花火の初期化
+  initializeFireworks();
+  
+  // マトリックスのドロップを初期化
+  for (int i = 0; i < MAX_DROPS; i++) {
+    dropY[i] = -random(1, 16); // 画面外に配置
+    dropSpeed[i] = random(1, 4);
+    dropActive[i] = random(100) < 30; // ランダムに有効化
+  }
+  
+  // スネークゲームを初期化
+  initializeSnake();
+  
+  // オーディオビジュアライザを初期化
+  for (int i = 0; i < 12; i++) {
+    spectrum[i] = 0;
+  }
+  
+  // 星座パターンを初期化
+  initializeStars();
+}
+
+// フレームバッファをクリアするユーティリティ関数
+void clearFrame() {
+  for (int y = 0; y < 8; y++) {
+    for (int x = 0; x < 12; x++) {
+      frame[y][x] = 0;
+    }
+  }
+}
+
+// フレームをLEDマトリックスに表示するユーティリティ関数
+void displayFrame() {
+  matrix.renderBitmap(frame, 8, 12);
+}
+
+// 花火パターンを初期化
+void initializeFireworks() {
+  for (int i = 0; i < MAX_FIREWORKS; i++) {
+    fireworkX[i] = random(1, 11);  // 中央付近
+    fireworkY[i] = 7;  // 画面下部
+    fireworkStage[i] = 0;  // 発射ステージ
+    fireworkSize[i] = random(2, 5);  // 爆発の大きさ
+    fireworkLastUpdate[i] = millis() + random(2000);  // 開始時間をずらす
+  }
+}
+
+// スネークゲームを初期化
+void initializeSnake() {
+  // スネークの初期位置
+  snakeLength = 3;
+  for (int i = 0; i < snakeLength; i++) {
+    snakeX[i] = 3 - i;
+    snakeY[i] = 3;
+  }
+  snakeDirection = 0; // 右方向
+  
+  // 食べ物の位置を設定
+  placeFood();
+  
+  snakeLastUpdate = millis();
+}
+
+// スネークゲームの食べ物を配置
+void placeFood() {
+  bool validPosition = false;
+  
+  while (!validPosition) {
+    foodX = random(12);
+    foodY = random(8);
+    
+    // スネークの体と重ならないことを確認
+    validPosition = true;
+    for (int i = 0; i < snakeLength; i++) {
+      if (snakeX[i] == foodX && snakeY[i] == foodY) {
+        validPosition = false;
+        break;
+      }
+    }
+  }
+}
+
+// 星座パターンを初期化
+void initializeStars() {
+  starsInitialized = true;
+  
+  // 星の位置と明るさを初期化
+  for (int i = 0; i < MAX_STARS; i++) {
+    starX[i] = random(12);
+    starY[i] = random(8);
+    starBrightness[i] = random(100);
+  }
+}
+
+//------ パターン実装 ------//
+
+// パターン1: ダイナミック炎エフェクト
+void patternFire() {
+  // 100msごとに炎を更新
+  if (millis() - flameLastUpdate > 100) {
+    flameLastUpdate = millis();
+    
+    // 底部の強度をランダムに更新
+    for (int x = 0; x < 12; x++) {
+      if (random(100) < 40) {
+        flameIntensity[x] = random(3, 8); // 最大強度を8に
+      }
+    }
+    
+    // 炎の強度を滑らかにする（隣接セルの平均化）
+    uint8_t newIntensity[12];
+    for (int x = 0; x < 12; x++) {
+      int sum = flameIntensity[x];
+      int count = 1;
+      
+      if (x > 0) {
+        sum += flameIntensity[x-1];
+        count++;
+      }
+      
+      if (x < 11) {
+        sum += flameIntensity[x+1];
+        count++;
+      }
+      
+      newIntensity[x] = sum / count;
+      if (newIntensity[x] > 0 && random(100) < 20) {
+        newIntensity[x]--;
+      }
+    }
+    
+    for (int x = 0; x < 12; x++) {
+      flameIntensity[x] = newIntensity[x];
+    }
+  }
+  
+  // フレームをクリア
+  clearFrame();
+  
+  // 炎を描画
+  for (int x = 0; x < 12; x++) {
+    int height = flameIntensity[x];
+    
+    for (int y = 0; y < height && y < 8; y++) {
+      // 底部ほど明るく
+      if (random(8 - y) == 0) {
+        // 確率的に点滅させる
+        continue;
+      }
+      
+      frame[7-y][x] = 1;
+    }
+  }
+}
+
+// パターン2: 花火ショー
+void patternFireworks() {
+  clearFrame();
+  
+  // 各花火を更新
+  for (int i = 0; i < MAX_FIREWORKS; i++) {
+    // 時間が来たら更新
+    if (millis() - fireworkLastUpdate[i] > 100) {
+      fireworkLastUpdate[i] = millis();
+      
+      // ステージに基づいて更新
+      if (fireworkStage[i] == 0) {
+        // 発射中 - 上に移動
+        fireworkY[i]--;
+        
+        // 頂点に達したら爆発
+        if (fireworkY[i] <= random(1, 5)) {
+          fireworkStage[i] = 1;
+        }
+      } else if (fireworkStage[i] == 1) {
+        // 爆発中 - 時間経過で消える
+        if (random(100) < 30) {
+          fireworkStage[i] = 2; // 消滅
+        }
+      } else {
+        // 消滅 - 新しい花火を開始
+        fireworkX[i] = random(1, 11);
+        fireworkY[i] = 7;
+        fireworkStage[i] = 0;
+        fireworkSize[i] = random(2, 5);
+        // 少し待機
+        fireworkLastUpdate[i] = millis() + random(500, 2000);
+      }
+    }
+    
+    // 花火を描画
+    if (fireworkStage[i] == 0) {
+      // 発射中の花火（上に移動する点）
+      if (fireworkY[i] >= 0 && fireworkY[i] < 8) {
+        frame[fireworkY[i]][fireworkX[i]] = 1;
+      }
+    } else if (fireworkStage[i] == 1) {
+      // 爆発中の花火（放射状のパターン）
+      int size = fireworkSize[i];
+      
+      for (int y = -size; y <= size; y++) {
+        for (int x = -size; x <= size; x++) {
+          // 円形の爆発
+          if (x*x + y*y <= size*size) {
+            // ランダムに点滅させる
+            if (random(100) < 70) {
+              int displayX = fireworkX[i] + x;
+              int displayY = fireworkY[i] + y;
+              
+              if (displayX >= 0 && displayX < 12 && displayY >= 0 && displayY < 8) {
+                frame[displayY][displayX] = 1;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// パターン3: マトリックスのような落下コード
+void patternMatrixRain() {
+  // マトリックスのドロップを更新
+  unsigned long currentMillis = millis();
+  static unsigned long lastDropUpdate = 0;
+  
+  if (currentMillis - lastDropUpdate > 150) {
+    lastDropUpdate = currentMillis;
+    
+    // 各ドロップを更新
+    for (int i = 0; i < MAX_DROPS; i++) {
+      if (dropActive[i]) {
+        // ドロップを下に移動
+        dropY[i] += dropSpeed[i];
+        
+        // 画面下部に到達したら、新しいドロップを作成
+        if (dropY[i] >= 8) {
+          dropY[i] = -random(1, 5);
+          dropSpeed[i] = random(1, 3);
+          dropActive[i] = random(100) < 40; // 40%の確率で有効のまま
+        }
+      } else if (random(100) < 5) {
+        // 新しいドロップをランダムに有効化
+        dropActive[i] = true;
+        dropY[i] = -random(1, 5);
+      }
+    }
+  }
+  
+  // フレームをクリア
+  clearFrame();
+  
+  // ドロップを描画
+  for (int i = 0; i < MAX_DROPS; i++) {
+    if (dropActive[i]) {
+      int tailLength = dropSpeed[i] + 1;
+      
+      for (int j = 0; j < tailLength; j++) {
+        int y = dropY[i] - j;
+        if (y >= 0 && y < 8) {
+          frame[y][i % 12] = 1;
+        }
+      }
+    }
+  }
+}
+
+// パターン4: 簡易スネークゲーム
+void patternSnake() {
+  unsigned long currentMillis = millis();
+  
+  // スネークの移動速度を制御
+  if (currentMillis - snakeLastUpdate > snakeSpeed) {
+    snakeLastUpdate = currentMillis;
+    
+    // 方向をランダムに変更（AIプレイヤー）
+    if (random(100) < 30) {
+      // 食べ物の方向に動く確率を高くする
+      int dx = foodX - snakeX[0];
+      int dy = foodY - snakeY[0];
+      
+      if (abs(dx) > abs(dy)) {
+        // 横方向の移動が優先
+        if (dx > 0) snakeDirection = 0; // 右
+        else snakeDirection = 2; // 左
+      } else {
+        // 縦方向の移動が優先
+        if (dy > 0) snakeDirection = 1; // 下
+        else snakeDirection = 3; // 上
+      }
+      
+      // ランダム性を維持するため、時々ランダムな方向に変更
+      if (random(100) < 20) {
+        snakeDirection = random(4);
+      }
+    }
+    
+    // スネークの体を移動（尻尾から頭の前まで）
+    for (int i = snakeLength - 1; i > 0; i--) {
+      snakeX[i] = snakeX[i-1];
+      snakeY[i] = snakeY[i-1];
+    }
+    
+    // 頭を移動
+    switch (snakeDirection) {
+      case 0: snakeX[0]++; break; // 右
+      case 1: snakeY[0]++; break; // 下
+      case 2: snakeX[0]--; break; // 左
+      case 3: snakeY[0]--; break; // 上
+    }
+    
+    // 画面の端でワープ
+    if (snakeX[0] < 0) snakeX[0] = 11;
+    if (snakeX[0] > 11) snakeX[0] = 0;
+    if (snakeY[0] < 0) snakeY[0] = 7;
+    if (snakeY[0] > 7) snakeY[0] = 0;
+    
+    // 食べ物を食べたかチェック
+    if (snakeX[0] == foodX && snakeY[0] == foodY) {
+      // スネークを成長させる
+      if (snakeLength < 20) {
+        snakeLength++;
+      }
+      
+      // 新しい食べ物を配置
+      placeFood();
+    }
+    
+    // 自分自身に衝突したかチェック
+    for (int i = 1; i < snakeLength; i++) {
+      if (snakeX[0] == snakeX[i] && snakeY[0] == snakeY[i]) {
+        // ゲームオーバー、スネークをリセット
+        initializeSnake();
+        break;
+      }
+    }
+  }
+  
+  // フレームをクリア
+  clearFrame();
+  
+  // スネークを描画
+  for (int i = 0; i < snakeLength; i++) {
+    if (snakeX[i] >= 0 && snakeX[i] < 12 && snakeY[i] >= 0 && snakeY[i] < 8) {
+      frame[snakeY[i]][snakeX[i]] = 1;
+    }
+  }
+  
+  // 食べ物を描画（点滅）
+  if (currentMillis % 500 < 300) {
+    frame[foodY][foodX] = 1;
+  }
+}
+
+// パターン5: 幾何学的なマンデルブロパターン
+void patternMandelbrot() {
+  clearFrame();
+  
+  // 回転フェーズを更新
+  rotationPhase += 0.02;
+  if (rotationPhase > 6.28) rotationPhase -= 6.28;
+  
+  // 中心点をゆっくり移動
+  centerX = -0.5 + 0.1 * sin(rotationPhase);
+  centerY = 0.1 * cos(rotationPhase * 0.7);
+  
+  // マトリックスの各ピクセルに対してマンデルブロ集合の計算
+  for (int y = 0; y < 8; y++) {
+    for (int x = 0; x < 12; x++) {
+      // ピクセル座標を複素平面上の点に変換
+      float normalizedX = (float)x / 12.0 - 0.5;
+      float normalizedY = (float)y / 8.0 - 0.5;
+      
+      // 回転
+      float rotX = normalizedX * cos(rotationPhase) - normalizedY * sin(rotationPhase);
+      float rotY = normalizedX * sin(rotationPhase) + normalizedY * cos(rotationPhase);
+      
+      // 複素平面上の点
+      float cr = centerX + rotX * zoom;
+      float ci = centerY + rotY * zoom;
+      
+      // マンデルブロ計算
+      float zr = 0;
+      float zi = 0;
+      int iter = 0;
+      const int maxIter = 20;
+      
+      while (zr*zr + zi*zi < 4.0 && iter < maxIter) {
+        float temp = zr*zr - zi*zi + cr;
+        zi = 2.0*zr*zi + ci;
+        zr = temp;
+        iter++;
+      }
+      
+      // 反復回数に基づいて描画
+      if (iter < maxIter) {
+        frame[y][x] = 0;
+      } else {
+        frame[y][x] = 1;
+      }
+    }
+  }
+}
+
+// パターン6: DNAヘリックスアニメーション
+void patternDNAHelix() {
+  clearFrame();
+  
+  // DNAフェーズを更新
+  dnaPhase += 0.15;
+  
+  // ヘリックスを描画
+  for (int x = 0; x < 12; x++) {
+    // 2つの螺旋
+    float angle1 = dnaPhase + x * 0.5;
+    float angle2 = dnaPhase + x * 0.5 + 3.14; // 180度位相をずらす
+    
+    int y1 = 3.5 + 3.0 * sin(angle1);
+    int y2 = 3.5 + 3.0 * sin(angle2);
+    
+    // 螺旋の2つの鎖
+    if (y1 >= 0 && y1 < 8) {
+      frame[y1][x] = 1;
+    }
+    
+    if (y2 >= 0 && y2 < 8) {
+      frame[y2][x] = 1;
+    }
+    
+    // 塩基対結合（横線）
+    if (abs(y1 - y2) <= 6) {
+      for (int y = min(y1, y2); y <= max(y1, y2); y++) {
+        // 塩基対は時々表示
+        if ((x + (int)dnaPhase) % 3 == 0 && y % 2 == 0) {
+          if (y >= 0 && y < 8) {
+            frame[y][x] = 1;
+          }
+        }
+      }
+    }
+  }
+}
+
+// パターン7: 星座アニメーション
+void patternStarConstellation() {
+  if (!starsInitialized) {
+    initializeStars();
+  }
+  
+  clearFrame();
+  
+  // 星の明るさを更新
+  for (int i = 0; i < MAX_STARS; i++) {
+    starBrightness[i] += random(-10, 11);
+    if (starBrightness[i] < 0) starBrightness[i] = 0;
+    if (starBrightness[i] > 100) starBrightness[i] = 100;
+  }
+  
+  // 星を描画
+  for (int i = 0; i < MAX_STARS; i++) {
+    if (starBrightness[i] > 50) {
+      frame[starY[i]][starX[i]] = 1;
+    }
+  }
+  
+  // 星座の線（星をランダムに接続）
+  for (int i = 0; i < MAX_STARS - 1; i++) {
+    if (starBrightness[i] > 70 && starBrightness[i+1] > 70) {
+      // 星間の線を描画
+      drawLine(starX[i], starY[i], starX[i+1], starY[i+1]);
+    }
+  }
+}
+
+// 2点間に線を描画
+void drawLine(int x0, int y0, int x1, int y1) {
+  int dx = abs(x1 - x0);
+  int dy = abs(y1 - y0);
+  int sx = (x0 < x1) ? 1 : -1;
+  int sy = (y0 < y1) ? 1 : -1;
+  int err = dx - dy;
+  
+  while (true) {
+    if (x0 >= 0 && x0 < 12 && y0 >= 0 && y0 < 8) {
+      frame[y0][x0] = 1;
+    }
+    
+    if (x0 == x1 && y0 == y1) break;
+    
+    int e2 = 2 * err;
+    if (e2 > -dy) {
+      err -= dy;
+      x0 += sx;
+    }
+    if (e2 < dx) {
+      err += dx;
+      y0 += sy;
+    }
+  }
+}
+
+// パターン8: オーディオビジュアライザシミュレーション
+void patternAudioVisualizer() {
+  // 100msごとにスペクトラムを更新
+  if (millis() - spectrumLastUpdate > 100) {
+    spectrumLastUpdate = millis();
+    
+    // 各バンドのレベルをランダムに更新
+    for (int i = 0; i < 12; i++) {
+      // 前の値に基づいて滑らかに変化
+      int change = random(-2, 3);
+      spectrum[i] += change;
+      
+      // バウンドをチェック
+      if (spectrum[i] < 0) spectrum[i] = 0;
+      if (spectrum[i] > 7) spectrum[i] = 7;
+      
+      // 低周波数と高周波数のバンドにパターンを追加
+      if (i < 3) {
+        // 低周波数は高くなりがち
+        if (random(100) < 30) spectrum[i] = random(4, 8);
+      } else if (i > 8) {
+        // 高周波数は低くなりがち
+        if (random(100) < 30) spectrum[i] = random(0, 4);
+      }
+    }
+  }
+  
+  // フレームをクリア
+  clearFrame();
+  
+  // スペクトラムバーを描画
+  for (int x = 0; x < 12; x++) {
+    int height = spectrum[x];
+    
+    for (int y = 0; y < height; y++) {
+      frame[7-y][x] = 1;
+    }
+  }
+}

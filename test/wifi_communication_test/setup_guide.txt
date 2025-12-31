@@ -1,0 +1,32 @@
+Arduino WiFi通信テスト セットアップガイド
+
+【概要】
+このプロジェクトはESP8266/ESP32ボードを使用してWiFi経由でPCと通信するテストプログラムです。
+Web制御インターフェースとTCP通信の両方を実装しています。
+
+【セットアップ方法】
+1. Arduino IDEにESP8266/ESP32ボードを追加
+   - 環境設定→追加のボードマネージャのURL
+   - ESP8266: http://arduino.esp8266.com/stable/package_esp8266com_index.json
+   - ESP32: https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+
+2. WiFiの設定を変更
+   - スケッチ内で以下の行を編集
+   const char* ssid = "YOUR_WIFI_SSID";
+   const char* password = "YOUR_WIFI_PASSWORD";
+
+3. ESP32の場合はTCP接続先IPアドレスを設定
+   - PCサーバーを起動して表示されるIPアドレスを設定
+   const char* serverIP = "192.168.1.100";  // あなたのPCのIP
+
+4. ボードにスケッチを書き込み
+
+5. PC側でPythonサーバーを起動
+   python pc_tcp_server.py
+
+【動作確認】
+- シリアルモニタでボードのIPアドレスを確認
+- ブラウザで「http://[ボードのIP]/」にアクセス
+- PCサーバーコンソールでコマンドを実行（led:on, led:offなど）
+
+困ったときはシリアルモニタの出力を確認してください。
